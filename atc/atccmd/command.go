@@ -23,7 +23,6 @@ import (
 	"github.com/concourse/concourse/atc/api/auth"
 	"github.com/concourse/concourse/atc/api/buildserver"
 	"github.com/concourse/concourse/atc/api/containerserver"
-	"github.com/concourse/concourse/atc/api/resourceserver"
 	"github.com/concourse/concourse/atc/auditor"
 	"github.com/concourse/concourse/atc/builds"
 	"github.com/concourse/concourse/atc/creds"
@@ -532,7 +531,6 @@ func (cmd *RunCommand) constructAPIMembers(
 
 	resourceFactory := resource.NewResourceFactory()
 	dbResourceCacheFactory := db.NewResourceCacheFactory(dbConn, lockFactory)
-	checkFactory := db.NewCheckFactory(dbConn, lockFactory)
 	fetchSourceFactory := resource.NewFetchSourceFactory(dbResourceCacheFactory, resourceFactory)
 	resourceFetcher := resource.NewFetcher(clock.NewClock(), lockFactory, fetchSourceFactory)
 	dbResourceConfigFactory := db.NewResourceConfigFactory(dbConn, lockFactory)
@@ -572,12 +570,6 @@ func (cmd *RunCommand) constructAPIMembers(
 	pool := worker.NewPool(workerProvider)
 	workerClient := worker.NewClient(pool, workerProvider)
 
-	checker := resourceserver.NewChecker(
-		secretManager,
-		checkFactory,
-		cmd.GlobalResourceCheckTimeout,
-	)
-
 	credsManagers := cmd.CredentialManagers
 	dbPipelineFactory := db.NewPipelineFactory(dbConn, lockFactory)
 	dbJobFactory := db.NewJobFactory(dbConn, lockFactory)
@@ -585,7 +577,7 @@ func (cmd *RunCommand) constructAPIMembers(
 	dbContainerRepository := db.NewContainerRepository(dbConn)
 	gcContainerDestroyer := gc.NewDestroyer(logger, dbContainerRepository, dbVolumeRepository)
 	dbBuildFactory := db.NewBuildFactory(dbConn, lockFactory, cmd.GC.OneOffBuildGracePeriod)
-	dbCheckFactory := db.NewCheckFactory(dbConn, lockFactory)
+	dbCheckFactory := db.NewCheckFactory(dbConn, lockFactory, secretManager, cmd.GlobalResourceCheckTimeout)
 	accessFactory := accessor.NewAccessFactory(authHandler.PublicKey())
 
 	apiHandler, err := cmd.constructAPIHandler(
@@ -604,7 +596,6 @@ func (cmd *RunCommand) constructAPIMembers(
 		dbResourceConfigFactory,
 		userFactory,
 		workerClient,
-		checker,
 		secretManager,
 		credsManagers,
 		accessFactory,
@@ -786,7 +777,7 @@ func (cmd *RunCommand) constructBackendMembers(
 	dbCheckLifecycle := db.NewCheckLifecycle(dbConn)
 	resourceConfigCheckSessionLifecycle := db.NewResourceConfigCheckSessionLifecycle(dbConn)
 	dbBuildFactory := db.NewBuildFactory(dbConn, lockFactory, cmd.GC.OneOffBuildGracePeriod)
-	dbCheckFactory := db.NewCheckFactory(dbConn, lockFactory)
+	dbCheckFactory := db.NewCheckFactory(dbConn, lockFactory, secretManager, cmd.GlobalResourceCheckTimeout)
 	dbPipelineFactory := db.NewPipelineFactory(dbConn, lockFactory)
 
 	bus := dbConn.Bus()
@@ -1368,7 +1359,6 @@ func (cmd *RunCommand) constructAPIHandler(
 	resourceConfigFactory db.ResourceConfigFactory,
 	dbUserFactory db.UserFactory,
 	workerClient worker.Client,
-	checker resourceserver.Checker,
 	secretManager creds.Secrets,
 	credsManagers creds.Managers,
 	accessFactory accessor.AccessFactory,
@@ -1425,7 +1415,6 @@ func (cmd *RunCommand) constructAPIHandler(
 		buildserver.NewEventHandler,
 
 		workerClient,
-		checker,
 
 		reconfigurableSink,
 
